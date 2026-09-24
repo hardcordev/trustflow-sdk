@@ -1,4 +1,4 @@
-import { Horizon, xdr } from '@stellar/stellar-sdk';
+import { Horizon, rpc, xdr } from '@stellar/stellar-sdk';
 import {
   HORIZON_URLS,
   SOROBAN_RPC_URLS,
@@ -28,6 +28,7 @@ import { createContractBinding, SorobanContractClient } from './contract';
  */
 export class TrustFlowClient {
   private server: Horizon.Server;
+  private sorobanServer?: rpc.Server;
   private readonly balanceCache?: SimpleCache<string, string>;
   private _connected: boolean = false;
 
@@ -163,6 +164,28 @@ export class TrustFlowClient {
    */
   getServer(): Horizon.Server {
     return this.server;
+  }
+
+  /**
+   * Returns a shared Soroban RPC server instance, constructed on first use.
+   *
+   * Built from {@link rpcUrl}, which the constructor already defaults to
+   * `SOROBAN_RPC_URLS[network]`, so a custom `rpcUrl` passed in `ClientConfig`
+   * is honoured by every caller. The instance is cached, so contract calls
+   * reuse one connection rather than building a throwaway server per call.
+   *
+   * @returns Cached rpc.Server instance for this client's network
+   *
+   * @example
+   * ```typescript
+   * const client = new TrustFlowClient({ network: 'testnet' });
+   * const server = client.getSorobanServer();
+   * const latest = await server.getLatestLedger();
+   * ```
+   */
+  getSorobanServer(): rpc.Server {
+    this.sorobanServer ??= new rpc.Server(this.rpcUrl);
+    return this.sorobanServer;
   }
 
   /**

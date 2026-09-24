@@ -1,4 +1,5 @@
 import { Transaction, xdr } from '@stellar/stellar-sdk';
+import { TrustFlowError } from '../errors';
 import type { ContractConfig } from '../types/contract';
 import type {
   InitMultiSigParams,
@@ -487,9 +488,12 @@ export class MultiSigEscrowClient {
     if (type === xdr.EnvelopeType.envelopeTypeTxFeeBump()) {
       return envelope.feeBump().signatures();
     }
-    // Legacy v0 envelope — v0 accessor not in type defs
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (envelope as any).v0?.().signatures?.() ?? [];
+    if (type === xdr.EnvelopeType.envelopeTypeTxV0()) {
+      return envelope.v0().signatures();
+    }
+    // Never fall through silently: a dropped signature here would let
+    // addSignature's threshold check undercount a real signer.
+    throw TrustFlowError.multiSigXdrError(`Unsupported transaction envelope type: ${type.name}`);
   }
 
   /** Replaces the signatures array on an envelope in-place. */
@@ -502,10 +506,10 @@ export class MultiSigEscrowClient {
       envelope.v1().signatures(signatures);
     } else if (type === xdr.EnvelopeType.envelopeTypeTxFeeBump()) {
       envelope.feeBump().signatures(signatures);
+    } else if (type === xdr.EnvelopeType.envelopeTypeTxV0()) {
+      envelope.v0().signatures(signatures);
     } else {
-      // Legacy v0 envelope — v0 accessor not in type defs
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (envelope as any).v0?.().signatures?.(signatures);
+      throw TrustFlowError.multiSigXdrError(`Unsupported transaction envelope type: ${type.name}`);
     }
   }
 

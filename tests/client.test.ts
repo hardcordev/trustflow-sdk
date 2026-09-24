@@ -4,6 +4,38 @@ import { TrustFlowError } from '../src/errors';
 describe('TrustFlowClient', () => {
   const mockContractId = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4';
 
+  describe('getSorobanServer', () => {
+    it('returns the same cached instance across calls', () => {
+      const client = new TrustFlowClient({ contractId: mockContractId });
+
+      expect(client.getSorobanServer()).toBe(client.getSorobanServer());
+    });
+
+    it('builds the server from a custom rpcUrl when one is configured', () => {
+      const rpcUrl = 'https://custom-rpc.example.com';
+      const client = new TrustFlowClient({ contractId: mockContractId, rpcUrl });
+
+      expect(client.getSorobanServer().serverURL.toString()).toContain(
+        'custom-rpc.example.com',
+      );
+    });
+
+    it('falls back to the network default when no rpcUrl is given', () => {
+      const client = new TrustFlowClient({ contractId: mockContractId });
+
+      expect(client.getSorobanServer().serverURL.toString()).toContain(
+        new URL(client.rpcUrl).host,
+      );
+    });
+
+    it('gives separate clients their own server instances', () => {
+      const a = new TrustFlowClient({ contractId: mockContractId });
+      const b = new TrustFlowClient({ contractId: mockContractId });
+
+      expect(a.getSorobanServer()).not.toBe(b.getSorobanServer());
+    });
+  });
+
   describe('constructor', () => {
     it('should create client with minimal config', () => {
       const client = new TrustFlowClient({
