@@ -4,7 +4,6 @@ import {
   TransactionBuilder,
   BASE_FEE,
 } from '@stellar/stellar-sdk';
-import { SOROBAN_RPC_URLS } from '../constants';
 import type { TrustFlowClient } from '../client';
 import type { ContractCallResult } from '../types/contract';
 import { TrustFlowError } from '../errors';
@@ -18,8 +17,7 @@ export async function invokeContract(
   caller: string,
   signAndSubmit?: SignAndSubmitFn,
 ): Promise<ContractCallResult> {
-  const rpcUrl = SOROBAN_RPC_URLS[client.network];
-  const server = new rpc.Server(rpcUrl);
+  const server = client.getSorobanServer();
   const contract = new Contract(client.contractId);
 
   try {

@@ -38,6 +38,9 @@ describe('contract module', () => {
     network: 'testnet',
     contractId: 'C...',
     getNetworkPassphrase: jest.fn().mockReturnValue('Test SDF Network ; September 2015'),
+    // Contract calls now go through the client's shared accessor, so this
+    // constructs through the same mocked rpc.Server each test configures.
+    getSorobanServer: jest.fn(() => new (rpc.Server as unknown as new () => rpc.Server)()),
   } as unknown as TrustFlowClient;
 
   beforeEach(() => {
@@ -183,6 +186,49 @@ describe('contract module', () => {
       (rpc.Server as jest.Mock).mockImplementation(() => mockServer);
 
       await expect(simulateContractCall(mockClient, 'xdr_string')).rejects.toThrow(TrustFlowError);
+    });
+
+    it('populates returnValue from the simulated result', async () => {
+      (rpc.Api.isSimulationError as unknown as jest.Mock).mockReturnValue(false);
+      const mockServer = {
+        simulateTransaction: jest
+          .fn()
+          .mockResolvedValue({ result: { retval: 'decoded_value' } }),
+      };
+      (rpc.Server as jest.Mock).mockImplementation(() => mockServer);
+
+      const result = await simulateContractCall(mockClient, 'xdr_string');
+      expect(result.success).toBe(true);
+      expect(result.returnValue).toBe('decoded_value');
+    });
+
+    it('leaves returnValue undefined when the simulation returns no retval', async () => {
+      (rpc.Api.isSimulationError as unknown as jest.Mock).mockReturnValue(false);
+      const mockServer = {
+        simulateTransaction: jest.fn().mockResolvedValue({ result: {} }),
+      };
+      (rpc.Server as jest.Mock).mockImplementation(() => mockServer);
+
+      const result = await simulateContractCall(mockClient, 'xdr_string');
+      expect(result.success).toBe(true);
+      expect(result.returnValue).toBeUndefined();
+    });
+  });
+
+  describe('shared Soroban server', () => {
+    it('is obtained from the client rather than constructed per call', async () => {
+      (rpc.Api.isSimulationError as unknown as jest.Mock).mockReturnValue(false);
+      const mockServer = {
+        simulateTransaction: jest.fn().mockResolvedValue({ result: {} }),
+      };
+      (rpc.Server as jest.Mock).mockImplementation(() => mockServer);
+
+      const accessor = mockClient.getSorobanServer as unknown as jest.Mock;
+      accessor.mockClear();
+
+      await simulateContractCall(mockClient, 'xdr_string');
+
+      expect(accessor).toHaveBeenCalledTimes(1);
     });
   });
 });

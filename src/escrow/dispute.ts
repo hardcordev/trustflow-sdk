@@ -14,6 +14,24 @@ import { logger } from '../utils/logger';
  * arguments (`ScVal`s) via `buildDisputeArgs`. Distinct from
  * `DisputeClient.raiseDispute`, which records the dispute with the backend
  * API rather than the on-chain contract.
+ *
+ * @param _client - Configured {@link TrustFlowClient}, reserved for the
+ * contract call once a live signer is wired in
+ * @param params - Dispute parameters: `escrowId`, `caller` and `reason`
+ * @returns A dispute transaction identifier. This is currently a locally
+ * generated placeholder, not an on-chain hash, until the encoded arguments are
+ * passed to the shared tx-pipeline.
+ * @throws {TrustFlowError} `VALIDATION_ERROR` if `escrowId` or `reason` is
+ * missing or blank, or `UNAUTHORIZED` if `caller` is missing
+ *
+ * @example
+ * ```typescript
+ * const txId = await disputeEscrow(client, {
+ *   escrowId: escrow.id,
+ *   caller: recipientAddress,
+ *   reason: 'Deliverable not received',
+ * });
+ * ```
  */
 export async function disputeEscrow(
   _client: TrustFlowClient,
@@ -38,15 +56,39 @@ export async function disputeEscrow(
 
 import type { ContractConfig } from '../types/contract';
 
+/** Constructor options for {@link DisputeClient}. */
 export interface DisputeClientOptions {
+  /** Per-request timeout (ms) applied to backend dispute calls. */
   timeoutMs?: number;
 }
 
+/**
+ * Client for recording and reading disputes through the TrustFlow backend API.
+ *
+ * Distinct from {@link disputeEscrow}, which targets the on-chain contract.
+ * Every method resolves to an {@link SDKResult} rather than throwing, so
+ * backend failures are handled as values.
+ *
+ * @example
+ * ```typescript
+ * const disputes = new DisputeClient({
+ *   apiBaseUrl: 'https://api.trustflow.xyz',
+ *   apiKey: process.env.API_KEY!,
+ * });
+ * const created = await disputes.raiseDispute({ escrowId, reason: 'Late delivery' });
+ * if (created.ok) console.log(created.data.disputeId);
+ * ```
+ */
 export class DisputeClient {
   private readonly http;
   private readonly apiUrl: string;
   private readonly token: string;
 
+  /**
+   * @param config - Contract configuration; `apiBaseUrl` and `apiKey` are both required
+   * @param options - Optional {@link DisputeClientOptions}
+   * @throws {Error} If `apiBaseUrl` or `apiKey` is missing
+   */
   constructor(
     config: ContractConfig,
     options: DisputeClientOptions = {},
@@ -73,6 +115,16 @@ export class DisputeClient {
    * Creates a dispute via the backend API.
    *
    * Transient backend failures are automatically retried before returning an error.
+   *
+   * @param params - Dispute payload sent to `POST /disputes`
+   * @returns An {@link SDKResult} carrying the new `disputeId`, or `ok: false`
+   * with an error message. Does not throw on backend failure.
+   *
+   * @example
+   * ```typescript
+   * const result = await disputes.raiseDispute({ escrowId, reason: 'No delivery' });
+   * if (!result.ok) console.error(result.error);
+   * ```
    */
   async raiseDispute(params: DisputeParams): Promise<SDKResult<{ disputeId: string }>> {
     try {
@@ -89,6 +141,16 @@ export class DisputeClient {
    * Retrieves dispute details from the backend API.
    *
    * Transient backend failures are automatically retried before returning an error.
+   *
+   * @param escrowId - Escrow whose dispute should be fetched
+   * @returns An {@link SDKResult} carrying the dispute record, or `ok: false`
+   * with an error message. Does not throw on backend failure.
+   *
+   * @example
+   * ```typescript
+   * const result = await disputes.getDispute(escrowId);
+   * if (result.ok) console.log(result.data);
+   * ```
    */
   async getDispute(escrowId: string): Promise<SDKResult<unknown>> {
     try {
