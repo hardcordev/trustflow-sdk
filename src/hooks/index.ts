@@ -11,3 +11,4 @@ export { useEscrow } from './useEscrow';
 // Like the other hooks it ships only from the `@trustflow/sdk/react` subpath,
 // not the package root, so non-React consumers aren't forced to install
 // `react` (#81).
+export { TrustFlowError } from '../errors';
