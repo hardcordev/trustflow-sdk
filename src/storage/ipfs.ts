@@ -1,4 +1,5 @@
 import type { SDKResult } from '../types/index';
+import type { AxiosInstance } from 'axios';
 import { createApiHttpClient, toApiErrorMessage } from '../utils/http';
 
 /** Default upload endpoint — a raw-body IPFS upload API (e.g. web3.storage-compatible). */
@@ -46,45 +47,57 @@ export interface IPFSUploadResult {
  * ```
  */
 export class IPFSStorage {
-  private readonly apiUrl: string;
-  private readonly apiKey?: string;
   private readonly gatewayUrl: string;
-  private readonly timeoutMs?: number;
+  private readonly http: AxiosInstance;
 
   constructor(config: IPFSConfig = {}) {
-    this.apiUrl = config.apiUrl ?? DEFAULT_IPFS_API_URL;
-    this.apiKey = config.apiKey;
     this.gatewayUrl = config.gatewayUrl ?? DEFAULT_IPFS_GATEWAY;
-    this.timeoutMs = config.timeoutMs;
+    this.http = createApiHttpClient({
+      baseURL: config.apiUrl ?? DEFAULT_IPFS_API_URL,
+      apiKey: config.apiKey,
+      timeoutMs: config.timeoutMs,
+    });
   }
 
   /**
    * Uploads a file to IPFS.
    *
-   * @param file - File contents as a `Buffer` or `Uint8Array`
+   * @param file - File contents as a `Buffer`, `Uint8Array`, `ArrayBuffer`, `Blob` or `File`.
+   *   For a `File`, its `name` is used as the default `filename`; for a `Blob` or `File`, its
+   *   `type` is used as the default `contentType`.
    * @param options - Optional filename / content type metadata
    * @returns `{ ok: true, data: { cid, url } }` on success, `{ ok: false, error }` on failure
    */
   async upload(
-    file: Buffer | Uint8Array,
+    file: Buffer | Uint8Array | ArrayBuffer | Blob,
     options: IPFSUploadOptions = {},
   ): Promise<SDKResult<IPFSUploadResult>> {
-    if (!file || file.byteLength === 0) {
-      return { ok: false, error: 'file must be a non-empty Buffer or Uint8Array' };
+    const isBlob = typeof Blob !== 'undefined' && file instanceof Blob;
+    const size = isBlob ? (file as Blob).size : (file as Buffer | Uint8Array | ArrayBuffer)?.byteLength;
+    if (!file || !size) {
+      return {
+        ok: false,
+        error: 'file must be a non-empty Buffer, Uint8Array, ArrayBuffer, Blob or File',
+      };
     }
 
-    const http = createApiHttpClient({
-      baseURL: this.apiUrl,
-      apiKey: this.apiKey,
-      timeoutMs: this.timeoutMs,
-      additionalHeaders: {
-        'Content-Type': options.contentType ?? 'application/octet-stream',
-        ...(options.filename ? { 'X-Name': options.filename } : {}),
-      },
-    });
+    const filename = options.filename ?? (isBlob ? (file as File).name : undefined);
+    const contentType =
+      options.contentType || (isBlob ? (file as Blob).type : '') || 'application/octet-stream';
 
     try {
-      const response = await http.post<{ cid?: string }>('/', file);
+      const body = isBlob
+        ? new Uint8Array(await (file as Blob).arrayBuffer())
+        : file instanceof ArrayBuffer
+          ? new Uint8Array(file)
+          : file;
+      // An empty url posts to the configured apiUrl as-is (no appended slash, query string kept).
+      const response = await this.http.post<{ cid?: string }>('', body, {
+        headers: {
+          'Content-Type': contentType,
+          ...(filename ? { 'X-Name': filename } : {}),
+        },
+      });
       const cid = response.data?.cid;
       if (!cid) {
         return { ok: false, error: 'Upload succeeded but response did not include a CID' };
