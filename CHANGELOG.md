@@ -1,6 +1,17 @@
 # Changelog
 
 ## [Unreleased]
+- Added a tag-triggered `release.yml` workflow (#305) that verifies, then publishes to npm with
+  provenance and creates the GitHub Release; `scripts/verify-release.js` checks the tag,
+  `package.json`, `SDK_VERSION`, the changelog heading and the `npm pack` file list. Documented in
+  `docs/RELEASING.md`.
+- Added an end-to-end suite (`npm run test:e2e`) and CI job that run against a local
+  `stellar/quickstart` network (#306). `TrustFlowClient` and `TransactionPipeline` now honour the
+  Stellar SDK's global `Config.setAllowHttp(true)` for plain-http RPC URLs.
+- Added real React tests (jsdom and `@testing-library/react`) for `useWallet`, `useBalance`,
+  `useTransaction` and `useEscrow`, run on React 18 and 19 in CI (#289).
+- Added unit tests for `escrow/create.ts`, `cancel.ts` and `release.ts` validation and argument
+  encoding (#276).
 - Added `./escrow`, `./wallet`, and `./utils` subpath exports (#100) — the
   README's Quick Start (`import { createEscrow } from '@trustflow/sdk/escrow'`,
   and likewise `/wallet`, `/utils`) previously failed with

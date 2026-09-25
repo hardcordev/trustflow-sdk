@@ -1,4 +1,4 @@
-import { Horizon, rpc, xdr } from '@stellar/stellar-sdk';
+import { Config, Horizon, rpc, xdr } from '@stellar/stellar-sdk';
 import {
   HORIZON_URLS,
   SOROBAN_RPC_URLS,
@@ -173,6 +173,8 @@ export class TrustFlowClient {
    * `SOROBAN_RPC_URLS[network]`, so a custom `rpcUrl` passed in `ClientConfig`
    * is honoured by every caller. The instance is cached, so contract calls
    * reuse one connection rather than building a throwaway server per call.
+   * Plain-http URLs are refused unless the Stellar SDK's global
+   * `Config.setAllowHttp(true)` is set (e.g. for a local quickstart node).
    *
    * @returns Cached rpc.Server instance for this client's network
    *
@@ -184,7 +186,7 @@ export class TrustFlowClient {
    * ```
    */
   getSorobanServer(): rpc.Server {
-    this.sorobanServer ??= new rpc.Server(this.rpcUrl);
+    this.sorobanServer ??= new rpc.Server(this.rpcUrl, { allowHttp: Config.isAllowHttp() });
     return this.sorobanServer;
   }
 

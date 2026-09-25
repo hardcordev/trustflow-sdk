@@ -46,3 +46,63 @@ jobs:
           test -f dist/index.mjs || exit 1
           test -f dist/index.d.ts || exit 1
           echo "✓ All build artifacts present"
+
+  hooks-react:
+    name: Hook tests (React ${{ matrix.react-version }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        react-version: [18, 19]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install React ${{ matrix.react-version }}
+        run: >
+          npm install --no-save --ignore-scripts
+          react@${{ matrix.react-version }}
+          react-dom@${{ matrix.react-version }}
+          @types/react@${{ matrix.react-version }}
+          @types/react-dom@${{ matrix.react-version }}
+
+      - name: Run hook tests
+        run: npx jest tests/hooks.test.ts tests/use-
+
+  e2e:
+    name: End-to-end (local Stellar network)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start Stellar quickstart (local mode)
+        run: docker run --rm -d -p 8000:8000 --name stellar stellar/quickstart:latest --local
+
+      - name: Run end-to-end tests
+        run: npm run test:e2e
+
+      - name: Show quickstart logs on failure
+        if: failure()
+        run: docker logs stellar
