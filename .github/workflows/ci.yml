@@ -31,11 +31,32 @@ jobs:
       - name: Run typecheck
         run: npm run typecheck
 
+      - name: Run test typecheck
+        run: npm run typecheck:tests
+
       - name: Run linter
         run: npm run lint
 
+      - name: Restore Jest cache
+        uses: actions/cache@v4
+        with:
+          path: .jest-cache
+          key: jest-${{ matrix.node-version }}-${{ hashFiles('package-lock.json', 'tsconfig*.json', 'jest.config.js') }}
+
       - name: Run tests
+        if: matrix.node-version != '22.x'
         run: npm test
+
+      - name: Run tests with coverage
+        if: matrix.node-version == '22.x'
+        run: npm run test:coverage
+
+      - name: Upload coverage report
+        if: matrix.node-version == '22.x'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
 
       - name: Build package
         run: npm run build

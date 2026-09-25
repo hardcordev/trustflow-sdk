@@ -34,4 +34,9 @@ describe('src/stellar submitTransaction (#110)', () => {
       submitTransaction,
     );
   });
+
+  it('src/stellar/rpc.ts no longer exists and simulateAndAssemble is not exported', () => {
+    expect(fs.existsSync(path.join(stellarDir, 'rpc.ts'))).toBe(false);
+    expect('simulateAndAssemble' in stellarBarrel).toBe(false);
+  });
 });
