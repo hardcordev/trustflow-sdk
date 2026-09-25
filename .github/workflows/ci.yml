@@ -67,3 +67,6 @@ jobs:
           test -f dist/index.mjs || exit 1
           test -f dist/index.d.ts || exit 1
           echo "✓ All build artifacts present"
+
+      - name: Check entry module identity
+        run: node scripts/check-dist-identity.js

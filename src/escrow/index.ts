@@ -6,3 +6,4 @@ export { MultiSigEscrowClient } from './multisig';
 export { createEscrow } from './create';
 export { releaseEscrow } from './release';
 export { cancelEscrow, getEscrow } from './cancel';
+export { TrustFlowError } from '../errors';
