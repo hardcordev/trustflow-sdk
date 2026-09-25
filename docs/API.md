@@ -145,8 +145,12 @@ if (status.data.isReady) {
 
 ## IPFSStorage
 - `new IPFSStorage(config?)` — `config.apiUrl` (default: web3.storage-compatible upload API), `config.apiKey`, `config.gatewayUrl`
-- `.upload(file, options?)` — uploads a `Buffer`/`Uint8Array`; returns `SDKResult<{ cid, url }>`
+- `.upload(file, options?)` — uploads a `Buffer`, `Uint8Array`, `ArrayBuffer`, `Blob` or browser `File` (a `File`'s `name` and a `Blob`'s `type` are used as the default `filename` / `contentType`); the request goes to `apiUrl` exactly as configured (no slash appended, query string kept); returns `SDKResult<{ cid, url }>`
 - Also available as `client.storage.upload(file)` on `TrustFlowClient` (configure via `new TrustFlowClient({ ipfs: { apiKey } })`)
+
+## Contract Bindings
+- `client.createContractBinding(specEntries, contractId?)` — builds a spec-driven `SorobanContractClient` (`methods.*`, `read_*`, `simulate_*`); also `createContractBinding`, `SorobanSpec`, `AbstractContractClient` and `generateTypeScriptBindings` from the root entry
+- See [CONTRACT_BINDINGS.md](./CONTRACT_BINDINGS.md) for obtaining spec entries, the JS-to-Soroban type-mapping table and known gaps
 
 ## EscrowBuilder
 Fluent builder: `.setDepositor().setBeneficiary().setAmount().build()`
