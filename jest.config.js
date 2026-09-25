@@ -8,6 +8,6 @@ module.exports = {
   setupFilesAfterEnv: ['<rootDir>/tests/support/scval-matchers.ts'],
   collectCoverageFrom: ['src/**/*.ts', '!src/**/*.d.ts'],
   coverageReporters: ['text-summary', 'lcov', 'json-summary'],
-  // Floor set just under the measured baseline; ratchet towards 60 (see CONTRIBUTING.md).
-  coverageThreshold: { global: { branches: 43, functions: 55, lines: 55, statements: 55 } },
+  // Floor set just under the measured baseline (61.5% statements, 50.5% branches, 59.5% functions, 61.6% lines); ratchet towards 60 (see CONTRIBUTING.md).
+  coverageThreshold: { global: { branches: 50, functions: 59, lines: 60, statements: 60 } },
 };
