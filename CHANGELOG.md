@@ -1,6 +1,16 @@
 # Changelog
 
 ## [Unreleased]
+- `submitTransaction` now throws a `TrustFlowError` for every failure (`CONNECTION_ERROR` for
+  network errors, `SUBMISSION_ERROR` for non-JSON, unexpected or rejected responses, `INVALID_CONFIG`
+  for a bad Horizon URL). Horizon rejections carry a `HorizonSubmissionErrorDetail` (`status`,
+  `title`, `detail`, `transactionCode`, `operationCodes`) as `cause`; a trailing slash in
+  `horizonUrl` is stripped and `successful: false` is thrown rather than returned.
+- Deleted `src/stellar/rpc.ts` again (it was re-added by commit 982047d "implemented") and added a
+  test that fails if it or `simulateAndAssemble` reappears.
+- CI now runs `npm run test:coverage` (Node 22.x, coverage uploaded as an artifact) against a
+  global floor in `jest.config.js`, and `npm run typecheck:tests`. Jest uses the `transform`
+  form of the ts-jest config with `isolatedModules` and a cached `.jest-cache` directory.
 - Added `./escrow`, `./wallet`, and `./utils` subpath exports (#100) — the
   README's Quick Start (`import { createEscrow } from '@trustflow/sdk/escrow'`,
   and likewise `/wallet`, `/utils`) previously failed with
