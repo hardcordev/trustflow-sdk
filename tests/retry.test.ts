@@ -62,3 +62,62 @@ describe('retry utility', () => {
     expect(delayFn).toHaveBeenCalledWith(2);
   });
 });
+
+describe('retry validation and onRetry semantics', () => {
+  it.each([0, -1, 1.5, NaN, Infinity])('rejects invalid attempts %p without calling fn', async (n) => {
+    const fn = jest.fn().mockResolvedValue('x');
+    await expect(retry(fn, n)).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-finite or negative numeric delayMs', async () => {
+    const fn = jest.fn().mockResolvedValue('x');
+    await expect(retry(fn, 2, -5)).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(retry(fn, { attempts: 2, delayMs: NaN })).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+    });
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('keeps the operation error and all attempts when onRetry throws', async () => {
+    const fn = jest.fn().mockRejectedValue(new Error('real failure'));
+    await expect(
+      retry(fn, {
+        attempts: 3,
+        delayMs: 1,
+        onRetry: () => {
+          throw new Error('logger crashed');
+        },
+      }),
+    ).rejects.toThrow('real failure');
+    expect(fn).toHaveBeenCalledTimes(3);
+  });
+
+  it('reports willRetry and delayMs to onRetry when all attempts fail', async () => {
+    const calls: Array<[number, { willRetry: boolean; delayMs: number }]> = [];
+    await expect(
+      retry(() => Promise.reject(new Error('nope')), {
+        attempts: 3,
+        delayMs: 2,
+        onRetry: (attempt, _err, info) => calls.push([attempt, info]),
+      }),
+    ).rejects.toThrow('nope');
+    expect(calls).toEqual([
+      [1, { willRetry: true, delayMs: 2 }],
+      [2, { willRetry: true, delayMs: 4 }],
+      [3, { willRetry: false, delayMs: 0 }],
+    ]);
+  });
+
+  it('passes the strategy function delay to onRetry', async () => {
+    const delays: number[] = [];
+    await expect(
+      retry(() => Promise.reject(new Error('nope')), {
+        attempts: 2,
+        delayMs: () => 3,
+        onRetry: (_a, _e, info) => delays.push(info.delayMs),
+      }),
+    ).rejects.toThrow('nope');
+    expect(delays).toEqual([3, 0]);
+  });
+});

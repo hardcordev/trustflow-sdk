@@ -221,6 +221,10 @@ const result = await client.storage.upload(fileBuffer, { filename: 'contract.pdf
 if (result.ok) console.log('Uploaded:', result.data.url);
 ```
 
+`upload()` accepts a `Buffer`, `Uint8Array`, `ArrayBuffer`, `Blob` or a browser `File` directly
+(e.g. from an `<input type="file">`); a `File`'s name and type are forwarded as the default
+filename and content type. The request is sent to `apiUrl` exactly as configured.
+
 `IPFSStorage` can also be used standalone via `new IPFSStorage(config)`, and points at a
 web3.storage-compatible raw-body upload API by default — pass `apiUrl` to target a different
 IPFS pinning service.
@@ -331,6 +335,7 @@ The `@trustflow/sdk/escrow`, `@trustflow/sdk/wallet`, and `@trustflow/sdk/utils`
 
 - **[Quick Start Guide](./docs/QUICKSTART.md)** — Get up and running in 5 minutes
 - **[API Reference](./docs/API.md)** — Complete API documentation
+- **[Contract Bindings](./docs/CONTRACT_BINDINGS.md)** — Spec-driven contract clients and the JS-to-Soroban type mapping
 - **[Architecture](./docs/ARCHITECTURE.md)** — Design principles and module structure
 - **[Examples](./examples/)** — Working code examples for common use cases
 - **API reference (generated)** — run `npm run docs` to build a browsable HTML API reference

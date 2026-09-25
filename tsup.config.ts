@@ -12,7 +12,9 @@ export default defineConfig({
   ],
   format: ['cjs', 'esm'],
   dts: true,
-  splitting: false,
+  // Shared chunks keep a single copy of TrustFlowError, logger and the escrow classes
+  // across the root and subpath entries (#304).
+  splitting: true,
   sourcemap: true,
   clean: true,
   treeshake: true,

@@ -43,6 +43,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.test.json",
     "test": "jest",
     "test:coverage": "jest --coverage",
     "test:e2e": "jest --config jest.e2e.config.js",
