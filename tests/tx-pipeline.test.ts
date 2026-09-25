@@ -4,6 +4,7 @@ import {
   Contract,
   FeeBumpTransaction,
   Keypair,
+  Memo,
   Networks,
   SorobanDataBuilder,
   Transaction,
@@ -349,6 +350,390 @@ describe('TransactionPipeline.run', () => {
     if (!result.ok) return;
     expect(result.data.feeBumped).toBe(true);
     expect(result.data.hash).toBe('second');
+    expect(sendSpy).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('TransactionPipeline.simulate', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('returns the simulation response on success', async () => {
+    const tx = buildUnsignedTx(Keypair.random().publicKey());
+    const response = simSuccess('900');
+    jest.spyOn(rpc.Server.prototype, 'simulateTransaction').mockResolvedValue(response);
+
+    const result = await new TransactionPipeline(makeClient()).simulate(tx);
+
+    expect(result).toEqual({ ok: true, data: response });
+  });
+
+  it('surfaces a SIMULATION_ERROR when the simulation reports an error', async () => {
+    const tx = buildUnsignedTx(Keypair.random().publicKey());
+    jest
+      .spyOn(rpc.Server.prototype, 'simulateTransaction')
+      .mockResolvedValue(simError('Error(Contract, #2)'));
+
+    const result = await new TransactionPipeline(makeClient()).simulate(tx);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('SIMULATION_ERROR');
+    expect(result.error.message).toContain('Error(Contract, #2)');
+  });
+
+  it('surfaces a SIMULATION_ERROR with the cause when the RPC call throws', async () => {
+    const tx = buildUnsignedTx(Keypair.random().publicKey());
+    const failure = new Error('rpc down');
+    jest.spyOn(rpc.Server.prototype, 'simulateTransaction').mockRejectedValue(failure);
+
+    const result = await new TransactionPipeline(makeClient()).simulate(tx);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('SIMULATION_ERROR');
+    expect(result.error.message).toContain('simulateTransaction request failed');
+    expect(result.error.cause).toBe(failure);
+  });
+});
+
+describe('TransactionPipeline.assemble options', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('applies the memo, fee and timeout', async () => {
+    const source = Keypair.random().publicKey();
+    jest.spyOn(rpc.Server.prototype, 'getAccount').mockResolvedValue(new Account(source, '100'));
+
+    const before = Math.floor(Date.now() / 1000);
+    const result = await new TransactionPipeline(makeClient()).assemble({
+      sourceAccount: source,
+      operations: [new Contract(CONTRACT_ID).call('increment')],
+      memo: Memo.text('escrow-1'),
+      fee: '500',
+      timeoutSeconds: 60,
+    });
+    const after = Math.floor(Date.now() / 1000);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.memo.type).toBe('text');
+    expect(String(result.data.memo.value)).toBe('escrow-1');
+    expect(result.data.fee).toBe('500');
+    const maxTime = Number(result.data.timeBounds?.maxTime);
+    expect(maxTime).toBeGreaterThanOrEqual(before + 60);
+    expect(maxTime).toBeLessThanOrEqual(after + 60);
+  });
+
+  it('defaults to no memo, the base fee and a 30 second window', async () => {
+    const source = Keypair.random().publicKey();
+    jest.spyOn(rpc.Server.prototype, 'getAccount').mockResolvedValue(new Account(source, '100'));
+
+    const before = Math.floor(Date.now() / 1000);
+    const result = await new TransactionPipeline(makeClient()).assemble({
+      sourceAccount: source,
+      operations: [new Contract(CONTRACT_ID).call('increment')],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.memo.type).toBe('none');
+    expect(result.data.fee).toBe(BASE_FEE);
+    expect(Number(result.data.timeBounds?.maxTime)).toBeGreaterThanOrEqual(before + 30);
+  });
+});
+
+describe('TransactionPipeline.submit confirmation polling', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+  });
+
+  function signedTx(): Transaction {
+    const keypair = Keypair.random();
+    const tx = buildUnsignedTx(keypair.publicKey());
+    tx.sign(keypair);
+    return tx;
+  }
+
+  function pending(hash = 'deadbeef'): rpc.Api.SendTransactionResponse {
+    return { status: 'PENDING', hash, latestLedger: 1, latestLedgerCloseTime: 1 };
+  }
+
+  function txStatus(status: rpc.Api.GetTransactionStatus, ledger?: number) {
+    return { status, ledger } as unknown as rpc.Api.GetTransactionResponse;
+  }
+
+  it('keeps polling through NOT_FOUND until the transaction succeeds', async () => {
+    jest.spyOn(rpc.Server.prototype, 'sendTransaction').mockResolvedValue(pending());
+    const getSpy = jest
+      .spyOn(rpc.Server.prototype, 'getTransaction')
+      .mockResolvedValueOnce(txStatus(rpc.Api.GetTransactionStatus.NOT_FOUND))
+      .mockResolvedValueOnce(txStatus(rpc.Api.GetTransactionStatus.NOT_FOUND))
+      .mockResolvedValueOnce(txStatus(rpc.Api.GetTransactionStatus.SUCCESS, 77));
+
+    const result = await new TransactionPipeline(makeClient()).submit(signedTx(), {
+      pollIntervalMs: 1,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.ledger).toBe(77);
+    expect(getSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it('fails with a SUBMISSION_ERROR when the transaction fails on-chain', async () => {
+    jest.spyOn(rpc.Server.prototype, 'sendTransaction').mockResolvedValue(pending('abc123'));
+    jest
+      .spyOn(rpc.Server.prototype, 'getTransaction')
+      .mockResolvedValue(txStatus(rpc.Api.GetTransactionStatus.FAILED));
+
+    const result = await new TransactionPipeline(makeClient()).submit(signedTx(), {
+      maxAttempts: 1,
+      pollIntervalMs: 1,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('RETRY_EXHAUSTED');
+    const cause = result.error.cause as TrustFlowError;
+    expect(cause.code).toBe('SUBMISSION_ERROR');
+    expect(cause.message).toContain('transaction abc123 failed on-chain');
+  });
+
+  // Known defect (#245): an on-chain FAILED result is retried blindly, which
+  // re-sends the same signed transaction. Flip to `it` once that is fixed.
+  it.failing('does not resend a transaction that already failed on-chain (#245)', async () => {
+    const sendSpy = jest.spyOn(rpc.Server.prototype, 'sendTransaction').mockResolvedValue(pending());
+    jest
+      .spyOn(rpc.Server.prototype, 'getTransaction')
+      .mockResolvedValue(txStatus(rpc.Api.GetTransactionStatus.FAILED));
+
+    await new TransactionPipeline(makeClient()).submit(signedTx(), {
+      maxAttempts: 3,
+      baseDelayMs: 1,
+      pollIntervalMs: 1,
+    });
+
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('times out after exhausting pollAttempts', async () => {
+    jest.spyOn(rpc.Server.prototype, 'sendTransaction').mockResolvedValue(pending('slow'));
+    const getSpy = jest
+      .spyOn(rpc.Server.prototype, 'getTransaction')
+      .mockResolvedValue(txStatus(rpc.Api.GetTransactionStatus.NOT_FOUND));
+
+    const result = await new TransactionPipeline(makeClient()).submit(signedTx(), {
+      maxAttempts: 1,
+      pollAttempts: 3,
+      pollIntervalMs: 1,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect((result.error.cause as TrustFlowError).message).toContain(
+      'timed out waiting for transaction slow to confirm',
+    );
+    expect(getSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it('surfaces a getTransaction failure raised mid-poll', async () => {
+    jest.spyOn(rpc.Server.prototype, 'sendTransaction').mockResolvedValue(pending());
+    jest
+      .spyOn(rpc.Server.prototype, 'getTransaction')
+      .mockResolvedValueOnce(txStatus(rpc.Api.GetTransactionStatus.NOT_FOUND))
+      .mockRejectedValueOnce(new Error('rpc down'));
+
+    const result = await new TransactionPipeline(makeClient()).submit(signedTx(), {
+      maxAttempts: 1,
+      pollIntervalMs: 1,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('RETRY_EXHAUSTED');
+    expect((result.error.cause as Error).message).toBe('rpc down');
+  });
+
+  it('reports feeBumped and the fee of a fee-bump envelope', async () => {
+    jest.spyOn(rpc.Server.prototype, 'sendTransaction').mockResolvedValue(pending());
+    jest
+      .spyOn(rpc.Server.prototype, 'getTransaction')
+      .mockResolvedValue(txStatus(rpc.Api.GetTransactionStatus.SUCCESS, 5));
+    const feeSource = Keypair.random();
+    const feeBump = TransactionBuilder.buildFeeBumpTransaction(
+      feeSource,
+      '1000',
+      signedTx(),
+      Networks.TESTNET,
+    );
+    feeBump.sign(feeSource);
+
+    const result = await new TransactionPipeline(makeClient()).submit(feeBump, {
+      pollIntervalMs: 1,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.feeBumped).toBe(true);
+    expect(result.data.feeCharged).toBe(feeBump.fee);
+  });
+
+  it('passes the retry policy overrides through to the retry helper', async () => {
+    jest.useFakeTimers();
+    const sendSpy = jest.spyOn(rpc.Server.prototype, 'sendTransaction').mockResolvedValue({
+      status: 'ERROR',
+      hash: 'deadbeef',
+      latestLedger: 1,
+      latestLedgerCloseTime: 1,
+    });
+
+    const submission = new TransactionPipeline(makeClient()).submit(signedTx(), {
+      maxAttempts: 3,
+      baseDelayMs: 100,
+      maxDelayMs: 150,
+    });
+
+    await jest.advanceTimersByTimeAsync(99);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(1);
+    expect(sendSpy).toHaveBeenCalledTimes(2);
+    // second delay is capped by maxDelayMs (200 -> 150)
+    await jest.advanceTimersByTimeAsync(149);
+    expect(sendSpy).toHaveBeenCalledTimes(2);
+    await jest.advanceTimersByTimeAsync(1);
+    expect(sendSpy).toHaveBeenCalledTimes(3);
+
+    const result = await submission;
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toContain('3 attempt(s)');
+  });
+});
+
+describe('TransactionPipeline.run failure paths', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  function runParams(source: Keypair, submit: Record<string, unknown> = {}) {
+    return {
+      sourceAccount: source.publicKey(),
+      operations: [new Contract(CONTRACT_ID).call('increment')],
+      signers: [source],
+      prepare: { maxAttempts: 1 },
+      submit: { maxAttempts: 1, pollIntervalMs: 1, ...submit },
+    };
+  }
+
+  function mockAssembleAndPrepare(source: Keypair) {
+    jest
+      .spyOn(rpc.Server.prototype, 'getAccount')
+      .mockResolvedValue(new Account(source.publicKey(), '100'));
+    jest.spyOn(rpc.Server.prototype, 'simulateTransaction').mockResolvedValue(simSuccess('500'));
+  }
+
+  function sendResult(status: 'ERROR' | 'TRY_AGAIN_LATER' | 'PENDING', hash = 'h') {
+    return { status, hash, latestLedger: 1, latestLedgerCloseTime: 1 } as rpc.Api.SendTransactionResponse;
+  }
+
+  it('returns the assembly error and makes no further RPC calls', async () => {
+    const source = Keypair.random();
+    jest.spyOn(rpc.Server.prototype, 'getAccount').mockRejectedValue(new Error('account not found'));
+    const simSpy = jest.spyOn(rpc.Server.prototype, 'simulateTransaction');
+    const sendSpy = jest.spyOn(rpc.Server.prototype, 'sendTransaction');
+
+    const result = await new TransactionPipeline(makeClient()).run(runParams(source));
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('ASSEMBLY_ERROR');
+    expect(simSpy).not.toHaveBeenCalled();
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it('returns the prepare error and never submits', async () => {
+    const source = Keypair.random();
+    jest
+      .spyOn(rpc.Server.prototype, 'getAccount')
+      .mockResolvedValue(new Account(source.publicKey(), '100'));
+    jest
+      .spyOn(rpc.Server.prototype, 'simulateTransaction')
+      .mockResolvedValue(simError('Error(Contract, #1)'));
+    const sendSpy = jest.spyOn(rpc.Server.prototype, 'sendTransaction');
+
+    const result = await new TransactionPipeline(makeClient()).run(runParams(source));
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('RETRY_EXHAUSTED');
+    expect((result.error.cause as TrustFlowError).code).toBe('SIMULATION_ERROR');
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it('returns the submission error when no fee bump is configured', async () => {
+    const source = Keypair.random();
+    mockAssembleAndPrepare(source);
+    const sendSpy = jest
+      .spyOn(rpc.Server.prototype, 'sendTransaction')
+      .mockResolvedValue(sendResult('TRY_AGAIN_LATER'));
+    const getSpy = jest.spyOn(rpc.Server.prototype, 'getTransaction');
+
+    const result = await new TransactionPipeline(makeClient()).run(runParams(source));
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('RETRY_EXHAUSTED');
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(getSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not escalate a submission failure that is not fee-related', async () => {
+    const source = Keypair.random();
+    mockAssembleAndPrepare(source);
+    const sendSpy = jest
+      .spyOn(rpc.Server.prototype, 'sendTransaction')
+      .mockResolvedValue(sendResult('ERROR'));
+
+    const result = await new TransactionPipeline(makeClient()).run(
+      runParams(source, { feeBump: { feeSource: Keypair.random(), baseFee: '5000' } }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('RETRY_EXHAUSTED');
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns FEE_BUMP_ERROR when the fee-bump envelope cannot be built', async () => {
+    const source = Keypair.random();
+    mockAssembleAndPrepare(source);
+    const sendSpy = jest
+      .spyOn(rpc.Server.prototype, 'sendTransaction')
+      .mockResolvedValue(sendResult('TRY_AGAIN_LATER'));
+
+    const result = await new TransactionPipeline(makeClient()).run(
+      runParams(source, { feeBump: { feeSource: Keypair.random(), baseFee: '1' } }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('FEE_BUMP_ERROR');
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns the error of a failed escalated submission', async () => {
+    const source = Keypair.random();
+    mockAssembleAndPrepare(source);
+    const sendSpy = jest
+      .spyOn(rpc.Server.prototype, 'sendTransaction')
+      .mockResolvedValueOnce(sendResult('TRY_AGAIN_LATER'))
+      .mockResolvedValueOnce(sendResult('ERROR', 'bumped'));
+
+    const result = await new TransactionPipeline(makeClient()).run(
+      runParams(source, { feeBump: { feeSource: Keypair.random(), baseFee: '5000' } }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('RETRY_EXHAUSTED');
     expect(sendSpy).toHaveBeenCalledTimes(2);
   });
 });

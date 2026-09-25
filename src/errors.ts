@@ -97,6 +97,17 @@ export class TrustFlowError extends Error {
     );
   }
 
+  static signingFailed(detail: string, cause?: unknown): TrustFlowError {
+    return new TrustFlowError(`Signing failed: ${detail}`, 'SIGNING_ERROR', cause);
+  }
+
+  static queueTimeout(timeoutMs: number): TrustFlowError {
+    return new TrustFlowError(
+      `Timed out after ${timeoutMs}ms waiting for earlier transactions from the same source account`,
+      'TIMEOUT',
+    );
+  }
+
   static retryExhausted(stage: string, attempts: number, cause?: unknown): TrustFlowError {
     return new TrustFlowError(
       `Retries exhausted for ${stage} after ${attempts} attempt(s)`,

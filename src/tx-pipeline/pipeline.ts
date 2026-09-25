@@ -9,6 +9,7 @@ import {
 import type { TrustFlowClient } from '../client';
 import { TrustFlowError } from '../errors';
 import { retry } from '../utils/retry';
+import { queueDepth, queueKey, runExclusive } from './queue';
 import type {
   AssembleParams,
   FeeBumpOptions,
@@ -88,6 +89,17 @@ async function withRetry<T>(
  *     confirmation, optionally escalating to a fee-bump transaction when the
  *     network reports a fee-related rejection.
  *  4. `run` — convenience method chaining all of the above.
+ *
+ * `run` serializes runs per source account: a later run for the same account
+ * (and network) waits until the earlier one has confirmed, failed or timed
+ * out, then reads a fresh sequence number, so concurrent runs never build
+ * transactions with the same sequence. Runs for different accounts proceed in
+ * parallel. The queue is shared by every `TransactionPipeline` in the current
+ * process; it does not coordinate across processes or machines, and the
+ * low-level `assemble`/`submit` methods bypass it. Use `queueTimeoutMs` to fail
+ * with a `TIMEOUT` error instead of waiting behind a stuck run. There is no
+ * abort signal yet, so a run that has started keeps the queue until it reaches
+ * a terminal state.
  *
  * Every method returns a {@link PipelineResult}, never throws for expected
  * failure modes, so callers get typed, actionable errors without try/catch.
@@ -270,6 +282,37 @@ export class TransactionPipeline {
    * @param params - Assembly, signing, prepare, and submit configuration
    */
   async run(params: RunPipelineParams): Promise<PipelineResult<PipelineSubmission>> {
+    if (params.serialize === false) {
+      return this.execute(params);
+    }
+
+    try {
+      return await runExclusive(
+        queueKey(this.client.getNetworkPassphrase(), params.sourceAccount),
+        () => this.execute(params),
+        params.queueTimeoutMs,
+      );
+    } catch (e) {
+      // Only the queue wait raises a TrustFlowError here; `execute` reports
+      // expected failures through its result, so anything else is unexpected.
+      if (e instanceof TrustFlowError && e.code === 'TIMEOUT') {
+        return fail(e);
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Number of `run()` calls for `sourceAccount` on this pipeline's network
+   * that are currently executing or waiting in the queue (in this process).
+   *
+   * @param sourceAccount - Public key (G...) of the source account
+   */
+  queueDepth(sourceAccount: string): number {
+    return queueDepth(queueKey(this.client.getNetworkPassphrase(), sourceAccount));
+  }
+
+  private async execute(params: RunPipelineParams): Promise<PipelineResult<PipelineSubmission>> {
     const assembled = await this.assemble(params);
     if (!assembled.ok) {
       return assembled;

@@ -91,6 +91,17 @@ export interface RunPipelineParams extends AssembleParams {
   prepare?: PrepareOptions;
   /** Options for the submit+confirm stage, including fee-bump escalation. */
   submit?: SubmitOptions;
+  /**
+   * Wait for earlier `run()` calls with the same source account (on the same
+   * network, across all pipeline instances in this process) to finish before
+   * fetching a sequence number. Set to `false` to skip the queue. Defaults to `true`.
+   */
+  serialize?: boolean;
+  /**
+   * Maximum time in ms to wait behind earlier runs before failing with a
+   * `TIMEOUT` error. Waits indefinitely when omitted. Ignored when `serialize` is `false`.
+   */
+  queueTimeoutMs?: number;
 }
 
 /** Union of transaction types the pipeline can submit. */
