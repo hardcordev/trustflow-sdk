@@ -1,16 +1,23 @@
 # Changelog
 
 ## [Unreleased]
-- `submitTransaction` now throws a `TrustFlowError` for every failure (`CONNECTION_ERROR` for
-  network errors, `SUBMISSION_ERROR` for non-JSON, unexpected or rejected responses, `INVALID_CONFIG`
-  for a bad Horizon URL). Horizon rejections carry a `HorizonSubmissionErrorDetail` (`status`,
-  `title`, `detail`, `transactionCode`, `operationCodes`) as `cause`; a trailing slash in
-  `horizonUrl` is stripped and `successful: false` is thrown rather than returned.
-- Deleted `src/stellar/rpc.ts` again (it was re-added by commit 982047d "implemented") and added a
-  test that fails if it or `simulateAndAssemble` reappears.
-- CI now runs `npm run test:coverage` (Node 22.x, coverage uploaded as an artifact) against a
-  global floor in `jest.config.js`, and `npm run typecheck:tests`. Jest uses the `transform`
-  form of the ts-jest config with `isolatedModules` and a cached `.jest-cache` directory.
+- `TransactionPipeline.run()` now serializes runs per source account (#311) — later runs for
+  the same account and network wait (across all pipeline instances in the process) until the
+  earlier one confirms, fails or times out, so concurrent runs no longer build transactions
+  with the same sequence number. Runs for different accounts stay parallel. New
+  `serialize` (default `true`) and `queueTimeoutMs` options on `RunPipelineParams` (a wait
+  past the timeout returns a `TIMEOUT` error) and `TransactionPipeline.queueDepth()`. The
+  queue is in-process only; `assemble`/`submit` bypass it.
+- `signWithFreighter` now verifies the wallet's answer (#292) — the signed envelope must parse
+  and be the same transaction (same hash and kind) with an added signature, optionally signed
+  by `expectedSigner`; wallet rejections, failures, network mismatches and bad responses throw
+  `SIGNING_ERROR` with the original error as `cause`. `network` is typed as `Network`, and the
+  function and its types are exported from `@trustflow/sdk/wallet`.
+- Added tests for `TransactionPipeline.simulate`, `run()` failure paths and confirmation
+  polling (#310), reaching full line coverage of `src/tx-pipeline/pipeline.ts`.
+- Added the Freighter integration spike write-up `docs/spikes/issue-312-freighter-integration.md`
+  (#312), based on the published `@stellar/freighter-api` sources; live-extension checks are
+  listed there as still outstanding.
 - Added `./escrow`, `./wallet`, and `./utils` subpath exports (#100) — the
   README's Quick Start (`import { createEscrow } from '@trustflow/sdk/escrow'`,
   and likewise `/wallet`, `/utils`) previously failed with
